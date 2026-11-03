@@ -1,12 +1,8 @@
-# Сборка и временные файлы
 winwal/build/
 Backups/
 *.zip
-*.txt
-!version.txt
 context*.txt
-
-# Тяжёлые локальные видео и DLL (кроме самого WinWal.exe для автообновлений)
+desktop_context.txt
 *.mp4
 *.webm
 *.mkv

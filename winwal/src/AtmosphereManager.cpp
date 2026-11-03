@@ -1027,7 +1027,7 @@ void AtmosphereCanvas::releaseObstacleAccumulations(const ObstacleSurface &obs, 
         p.x = px; p.y = py;
         p.vx = (rng->bounded(36) - 18) * 1.0f;
         p.vy = violent ? (65.0f + rng->bounded(75)) : (40.0f + rng->bounded(50));
-        p.size = std::clamp(wd.radius * 0.85f, 2.8f, 5.0f);
+        p.size = std::clamp(wd.radius * 0.46f, 1.3f, 2.3f);
         p.alpha = 0.90f; p.depth = 0.95f;
         if (m_particles.size() < 460) m_particles.append(p);
         if (violent && m_splashes.size() < 180) {
@@ -2240,7 +2240,7 @@ void AtmosphereCanvas::onTick() {
                         wd.relY = std::max(4.0f, p.y);
                         wd.sideWall = 0; wd.spreadProg = 1.0f; wd.detachProg = 1.0f;
                         wd.mass = 1.18f + (rng->bounded(120) * 0.01f) * p.size;
-                        wd.radius = std::clamp(3.80f + wd.mass * 1.85f, 4.2f, 7.6f);
+                        wd.radius = std::clamp(2.15f + wd.mass * 0.95f, 2.2f, 4.1f);
                         wd.spreadX = wd.radius;
                         wd.vy = (18.0f + wd.mass * 6.0f) * float(mgr->dropSlideSpeed());
                         wd.driftSlope = ((rng->bounded(32) - 16) * 0.01f) + wind * 0.05f;
@@ -2466,7 +2466,7 @@ void AtmosphereCanvas::onTick() {
                             wd.mass = 1.15f + (rng->bounded(110) * 0.01f) * p.size;
                             wd.radius = obs.isWaybar
                                 ? std::clamp(3.10f + wd.mass * 1.35f, 3.2f, 5.6f)
-                                : std::clamp(3.80f + wd.mass * 1.85f, 4.2f, 7.4f);
+                                : std::clamp(2.15f + wd.mass * 0.95f, 2.2f, 4.0f);
                             wd.spreadX = wd.radius;
                             wd.vy = (obs.isWaybar ? (8.5f + wd.mass * 3.0f) : (16.0f + wd.mass * 5.5f)) * float(mgr->dropSlideSpeed());
                             wd.driftSlope = ((rng->bounded(30) - 15) * 0.01f) + wind * 0.05f;
@@ -2698,7 +2698,7 @@ void AtmosphereCanvas::onTick() {
                         wd.vy = (obs.isWaybar ? (8.5f + wd.mass * 3.0f) : (16.0f + wd.mass * 5.0f)) * float(mgr->dropSlideSpeed());
                         wd.radius = obs.isWaybar
                             ? std::clamp(3.10f + wd.mass * 1.35f, 3.20f, 5.60f)
-                            : std::clamp(3.80f + wd.mass * 1.85f, 4.20f, 7.60f);
+                            : std::clamp(2.15f + wd.mass * 0.95f, 2.20f, 4.10f);
                         wd.spreadX = wd.radius;
                         wd.driftSlope = ((rng->bounded(36) - 18) * 0.01f) + wind * 0.06f;
                         wd.tailDirX = wd.driftSlope;
@@ -2818,7 +2818,7 @@ void AtmosphereCanvas::onTick() {
                 } else {
                     float massLossRate = 0.00042f;
                     wd.mass -= dyStep * massLossRate;
-                    wd.radius = std::clamp(3.60f + wd.mass * 1.85f, 4.00f, 7.60f);
+                    wd.radius = std::clamp(2.05f + wd.mass * 0.95f, 2.10f, 4.00f);
                     if (wd.mass <= 0.20f) {
                         if (obs.trailBeads.size() < 95) {
                             TrailBead tb; tb.relX = wd.relX; tb.relY = wd.relY;
@@ -2915,7 +2915,7 @@ void AtmosphereCanvas::onTick() {
                     drip.x = float(obs.rect.left() + wd.relX * obs.rect.width());
                     drip.y = float(obs.rect.bottom() + 1.0);
                     drip.vx = 0.0f; drip.vy = 65.0f;
-                    drip.size = std::clamp(wd.radius * 0.85f, 2.8f, 4.8f);
+                    drip.size = std::clamp(wd.radius * 0.45f, 1.3f, 2.2f);
                     drip.alpha = 0.90f; drip.depth = 0.95f;
                     if (m_particles.size() < 460) m_particles.append(drip);
                     obs.waterDrops.removeAt(d);
@@ -3213,7 +3213,7 @@ void AtmosphereCanvas::paintWaterMap(QPainter *painter, const AtmosphereCanvas *
 
                     double hangDist = (0.8 + std::pow(dp, 1.25) * 5.2) * dScale;
                     double headY = baseTopY + hangDist;
-                    double headR = std::clamp(double(1.80 + wd.mass * 0.85) * (0.70 + 0.30 * dp), 1.80, 3.80) * dScale;
+                    double headR = std::clamp(double(1.15 + wd.mass * 0.50) * (0.70 + 0.30 * dp), 1.15, 2.35) * dScale;
                     for (int seg = 0; seg < 6; ++seg) {
                         double t = seg / 5.0;
                         double sy = headY - hangDist * 0.85 * t;
@@ -3248,7 +3248,7 @@ void AtmosphereCanvas::paintWaterMap(QPainter *painter, const AtmosphereCanvas *
             } else {
                 // Живая, слегка искажающаяся при скольжении 3D-капля:
                 // 1) Асимметричная головка, которая чуть колышется и наклоняется при движении
-                double headR = std::clamp(double(wd.radius) * 0.78 * (1.05 - 0.08 * wd.stretchFactor), 2.4, 5.4) * dScale;
+                double headR = std::clamp(double(wd.radius) * 0.56 * (1.05 - 0.08 * wd.stretchFactor), 1.4, 3.0) * dScale;
                 double phase = wd.relY * 0.12 + wd.relX * 41.0;
                 double wobbleX = std::sin(phase) * 0.14;
                 double lobeShiftX = (wd.tailDirX * 0.8 + std::cos(phase * 1.3) * 0.20) * headR;
@@ -3259,8 +3259,8 @@ void AtmosphereCanvas::paintWaterMap(QPainter *painter, const AtmosphereCanvas *
                 double tailLen = std::min(maxAllowedTail, desiredTail);
                 double tailShiftX = -tailLen * wd.tailDirX;
 
-                for (int seg = 0; seg < 14; ++seg) {
-                    double t = seg / 13.0;
+                for (int seg = 0; seg < 8; ++seg) {
+                    double t = seg / 7.0;
                     double pinchWave = 1.0 + 0.15 * std::sin(t * 5.2 - wd.relY * 0.15) * t;
                     double sr = headR * (1.0 - 0.80 * std::pow(t, 0.70)) * pinchWave;
                     double meanderX = std::sin(t * 4.2 + phase) * headR * 0.30 * t * (1.0 - t * 0.35);
@@ -3292,12 +3292,12 @@ void AtmosphereCanvas::paintWaterMap(QPainter *painter, const AtmosphereCanvas *
     for (const auto &p : src->m_particles) {
         if (suppressInAppRainStreaks && p.type == Rain) continue;
         if (p.type == FallingDrop) {
-            double rDrop = std::clamp(double(p.size) * 0.82, 2.1, 4.0) * dScale;
-            double stretchMul = std::clamp(double(p.vy) / 180.0, 1.3, 3.4);
-            for (int fd = 0; fd < 7; ++fd) {
-                double u = fd / 6.0;
-                double sr = rDrop * (1.0 - 0.72 * u);
-                drawDome(p.x - p.vx * 0.025 * u, p.y - rDrop * 3.2 * stretchMul * u, sr * 0.82, sr * 1.45, 0, int(242 - 95 * u), 255);
+            double rDrop = std::clamp(double(p.size) * 0.54, 1.1, 2.1) * dScale;
+            double stretchMul = std::clamp(double(p.vy) / 220.0, 1.0, 2.0);
+            for (int fd = 0; fd < 4; ++fd) {
+                double u = fd / 3.0;
+                double sr = rDrop * (1.0 - 0.68 * u);
+                drawDome(p.x - p.vx * 0.018 * u, p.y - rDrop * 2.1 * stretchMul * u, sr * 0.82, sr * 1.30, 0, int(238 - 90 * u), 255);
             }
         } else if (p.type == Rain) {
             if (p.depth < 0.52f) {

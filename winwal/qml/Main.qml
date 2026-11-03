@@ -11,6 +11,8 @@ ApplicationWindow {
     visible: Config ? !Config.isDaemonStart() : true
     Component.onCompleted: { if (!visible) Hypr.trimMemory() }
     width: 1040
+    minimumWidth: 780
+    minimumHeight: 520
     property int startupHeight: Config ? Config.windowHeight : 720
     height: startupHeight
     objectName: "mainControlWindow"
@@ -755,6 +757,67 @@ ApplicationWindow {
                 }
 
                 fragmentShader: "qrc:/shaders/qml/shaders/click_fx.frag.qsb"
+            }
+
+            // Интерактивные границы и углы для изменения размера окна мышью (как у обычного окна Windows)
+            Item {
+                id: winResizeBorders
+                anchors.fill: parent
+                z: 2000
+                visible: root.visibility === Window.Windowed
+
+                // Левая грань
+                MouseArea {
+                    anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                    anchors.topMargin: 8; anchors.bottomMargin: 8; width: 6
+                    cursorShape: Qt.SizeHorCursor
+                    onPressed: root.startSystemResize(Qt.LeftEdge)
+                }
+                // Правая грань
+                MouseArea {
+                    anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom
+                    anchors.topMargin: 8; anchors.bottomMargin: 8; width: 6
+                    cursorShape: Qt.SizeHorCursor
+                    onPressed: root.startSystemResize(Qt.RightEdge)
+                }
+                // Верхняя грань
+                MouseArea {
+                    anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+                    anchors.leftMargin: 8; anchors.rightMargin: 8; height: 5
+                    cursorShape: Qt.SizeVerCursor
+                    onPressed: root.startSystemResize(Qt.TopEdge)
+                }
+                // Нижняя грань
+                MouseArea {
+                    anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
+                    anchors.leftMargin: 8; anchors.rightMargin: 8; height: 6
+                    cursorShape: Qt.SizeVerCursor
+                    onPressed: root.startSystemResize(Qt.BottomEdge)
+                }
+                // Левый верхний угол
+                MouseArea {
+                    anchors.left: parent.left; anchors.top: parent.top; width: 10; height: 10
+                    cursorShape: Qt.SizeFDiagCursor
+                    onPressed: root.startSystemResize(Qt.LeftEdge | Qt.TopEdge)
+                }
+                // Правый верхний угол
+                MouseArea {
+                    anchors.right: parent.right; anchors.top: parent.top; width: 10; height: 10
+                    cursorShape: Qt.SizeBDiagCursor
+                    onPressed: root.startSystemResize(Qt.RightEdge | Qt.TopEdge)
+                }
+                // Левый нижний угол
+                MouseArea {
+                    anchors.left: parent.left; anchors.bottom: parent.bottom; width: 10; height: 10
+                    cursorShape: Qt.SizeBDiagCursor
+                    onPressed: root.startSystemResize(Qt.LeftEdge | Qt.BottomEdge)
+                }
+                // Правый нижний угол
+                MouseArea {
+                    anchors.right: parent.right; anchors.bottom: parent.bottom; width: 10; height: 10
+                    cursorShape: Qt.SizeFDiagCursor
+                    onPressed: root.startSystemResize(Qt.RightEdge | Qt.BottomEdge)
+                }
             }
 
             Item {

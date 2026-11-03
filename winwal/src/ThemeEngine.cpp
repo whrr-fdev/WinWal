@@ -37,20 +37,29 @@ static void applyWin32WindowBlur(qreal val) {
     }
     if (!setAttr) return;
 
+    static HWND s_lastHwnd = nullptr;
+    static int s_lastAlpha = -999;
+
     for (QWindow *w : QGuiApplication::topLevelWindows()) {
         if (w->objectName() != "mainControlWindow") continue;
-        HWND hwnd = reinterpret_cast<HWND>(w->winId()); if (hwnd) { SetWindowTextW(hwnd, L""); LONG_PTR st = GetWindowLongPtrW(hwnd, GWL_STYLE); SetWindowLongPtrW(hwnd, GWL_STYLE, st & ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU)); }
+        HWND hwnd = reinterpret_cast<HWND>(w->winId());
         if (!hwnd) continue;
 
+        int targetAlpha = (val <= 0.01) ? 0 : std::clamp(int(val * 210.0), 15, 220);
+        if (hwnd == s_lastHwnd && targetAlpha == s_lastAlpha) return;
+        s_lastHwnd = hwnd;
+        s_lastAlpha = targetAlpha;
+
+        SetWindowRgn(hwnd, nullptr, FALSE);
+
         ACCENT_POLICY policy = {};
-        if (val <= 0.01) {
-            policy.AccentState = 0; // ACCENT_DISABLED
+        if (targetAlpha <= 0) {
+            policy.AccentState = 0;
+            policy.AccentFlags = 0;
         } else {
-            // Используем ACCENT_ENABLE_BLURBEHIND (3), т.к. он не вызывает лагов перетаскивания на Windows 10!
-            policy.AccentState = 3;
-            policy.AccentFlags = 2;
-            int alpha = std::clamp(int(val * 210.0), 15, 220);
-            policy.GradientColor = (DWORD(alpha) << 24) | 0x000A0A0CU;
+            policy.AccentState = 3; // ACCENT_ENABLE_BLURBEHIND
+            policy.AccentFlags = 0; // Равномерный блюр без прямоугольника 160x28 в левом верхнем углу!
+            policy.GradientColor = (DWORD(targetAlpha) << 24) | 0x000A0A0CU;
         }
         WINDOWCOMPOSITIONATTRIBDATA data = {19, &policy, sizeof(policy)};
         setAttr(hwnd, &data);
