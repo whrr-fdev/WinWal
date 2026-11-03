@@ -37,7 +37,6 @@ static HWINEVENTHOOK s_winMoveEventHook = nullptr;
 static void CALLBACK WinLocationChangeEventProc(
     HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD)
 {
-    if (event == EVENT_SYSTEM_FOREGROUND && s_lookInst && s_lookInst->enabled()) { QMetaObject::invokeMethod(s_lookInst, "onTick", Qt::QueuedConnection); return; }
     if (event != EVENT_OBJECT_LOCATIONCHANGE || idObject != OBJID_WINDOW || idChild != CHILDID_SELF || !hwnd)
         return;
     if (!s_lookInst || !s_lookInst->enabled() || !s_lookInst->blurEnabled())
@@ -45,6 +44,14 @@ static void CALLBACK WinLocationChangeEventProc(
     quintptr key = reinterpret_cast<quintptr>(hwnd);
     auto it = s_blurBackdrops.constFind(key);
     if (it == s_blurBackdrops.constEnd()) return;
+
+    static quintptr s_lastMovedKey = 0;
+    static ULONGLONG s_lastMoveTick = 0;
+    ULONGLONG nowT = GetTickCount64();
+    if (key == s_lastMovedKey && (nowT - s_lastMoveTick) < 15) return;
+    s_lastMovedKey = key;
+    s_lastMoveTick = nowT;
+
     HWND hBlur = it.value();
     if (!hBlur || !IsWindow(hBlur)) return;
 
@@ -71,14 +78,12 @@ static LRESULT CALLBACK TilingLowLevelKbProc(int nCode, WPARAM wParam, LPARAM lP
         bool ctrlHeld = ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0);
         bool winHeld = ((GetAsyncKeyState(VK_LWIN) & 0x8000) != 0) || ((GetAsyncKeyState(VK_RWIN) & 0x8000) != 0);
         if (altHeld && !ctrlHeld && !winHeld && kb) {
-            // Alt + Space: переключить плавающий режим (Floating) и отцентрировать окно посередине экрана!
             if (!shiftHeld && kb->vkCode == VK_SPACE) {
                 QMetaObject::invokeMethod(s_lookInst, "toggleActiveWindowFloating", Qt::QueuedConnection);
                 return 1;
             }
-            // Alt + Shift + Стрелки ИЛИ Alt + Shift + W/A/S/D: поменять местами активное окно в выбранную сторону!
             if (shiftHeld && s_lookInst->tilingEnabled()) {
-                int dir = -1; // 0 = Left (← / A), 1 = Right (→ / D), 2 = Up (↑ / W), 3 = Down (↓ / S)
+                int dir = -1;
                 if (kb->vkCode == VK_LEFT || kb->vkCode == 'A') dir = 0;
                 else if (kb->vkCode == VK_RIGHT || kb->vkCode == 'D') dir = 1;
                 else if (kb->vkCode == VK_UP || kb->vkCode == 'W') dir = 2;
@@ -137,8 +142,6 @@ static HWND getOrCreateBlurBackdrop(quintptr targetKey) {
         WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         L"WinWalDwmGlassSheet", L"", WS_POPUP,
         0, 0, 10, 10, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-    MARGINS m = {-1, -1, -1, -1};
-    DwmExtendFrameIntoClientArea(hBlur, &m);
     s_blurBackdrops.insert(targetKey, hBlur);
     return hBlur;
 }
@@ -184,7 +187,6 @@ static bool isTileableAppWindow(HWND hwnd, DWORD selfPid, bool skipWinWal, int s
     LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
     if ((ex & WS_EX_TOOLWINDOW) || (ex & WS_EX_TRANSPARENT) || (ex & WS_EX_NOACTIVATE) || (ex & WS_EX_TOPMOST))
         return false;
-    // Тайлим обычные изменяемые по размеру окна (или главное окно WinWal, если разрешено)
     if (pid != selfPid && !(style & WS_THICKFRAME)) return false;
 
     wchar_t cls[128] = {};
@@ -204,7 +206,6 @@ static bool isTileableAppWindow(HWND hwnd, DWORD selfPid, bool skipWinWal, int s
     GetWindowRect(hwnd, &r);
     int w = r.right - r.left, h = r.bottom - r.top;
     if (w < 120 || h < 80) return false;
-    // Не трогаем полноэкранные игры без рамок
     if (w >= scrW && h >= scrH && !(style & WS_CAPTION) && pid != selfPid) return false;
 
     return true;
@@ -243,7 +244,9 @@ LookManager::LookManager(QObject *parent) : QObject(parent) {
 #ifdef Q_OS_WIN
     if (!s_tilingKbHook) {
         s_tilingKbHook = SetWindowsHookExW(WH_KEYBOARD_LL, TilingLowLevelKbProc, GetModuleHandleW(nullptr), 0);
-    if (!s_winMoveEventHook) s_winMoveEventHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_LOCATIONCHANGE, nullptr, WinLocationChangeEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    }
+    if (!s_winMoveEventHook) {
+        s_winMoveEventHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, WinLocationChangeEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     }
 #endif
     m_timer.setInterval(220);
@@ -255,8 +258,11 @@ LookManager::~LookManager() {
 #ifdef Q_OS_WIN
     if (s_tilingKbHook) {
         UnhookWindowsHookEx(s_tilingKbHook);
-    if (s_winMoveEventHook) { UnhookWinEvent(s_winMoveEventHook); s_winMoveEventHook = nullptr; }
         s_tilingKbHook = nullptr;
+    }
+    if (s_winMoveEventHook) {
+        UnhookWinEvent(s_winMoveEventHook);
+        s_winMoveEventHook = nullptr;
     }
 #endif
     if (s_lookInst == this) s_lookInst = nullptr;
@@ -331,7 +337,6 @@ void LookManager::restoreAllWindows() {
 void LookManager::applyTilingLayoutPass() {
 #ifdef Q_OS_WIN
     if (!m_tilingEnabled || g_workspaceGlideActive.load()) return;
-    // Не мешаем пользователю, пока он перетаскивает или меняет размер окна мышью!
     static bool s_wasLmbDown = false;
     bool lmbDown = ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0);
     if (lmbDown) {
@@ -361,7 +366,6 @@ void LookManager::applyTilingLayoutPass() {
         return TRUE;
     }, reinterpret_cast<LPARAM>(&ctx));
 
-    // Удаляем закрытые/свёрнутые окна из m_tiledOrder и добавляем новые
     for (int i = m_tiledOrder.size() - 1; i >= 0; --i) {
         if (!ctx.found.contains(m_tiledOrder[i])) {
             m_tiledOrder.removeAt(i);
@@ -376,7 +380,6 @@ void LookManager::applyTilingLayoutPass() {
     int N = m_tiledOrder.size();
     if (N == 0) return;
 
-    // Если пользователь только что отпустил ЛКМ после перетаскивания окна влево — меняем его местами с главным (Master)!
     if (s_wasLmbDown && N >= 2) {
         s_wasLmbDown = false;
         HWND fg = GetForegroundWindow();
@@ -403,21 +406,14 @@ void LookManager::applyTilingLayoutPass() {
                 std::max(150, int(wa.bottom - wa.top) - gOut * 2));
 
     if (N == 1 || m_tilingLayout == 3) {
-        // 1 окно или режим Монокль (Monocle)
         for (int i = 0; i < N; ++i) {
             placeWindowWithDwmFrameCompensation(reinterpret_cast<HWND>(m_tiledOrder[i]), avail);
         }
     } else if (m_tilingLayout == 0) {
-        // Умная сетка (Сначала 2 рядом -> затем правая половина делится на 2 -> затем левая половина делится на 2 -> и т.д.)
         int leftW  = int(std::round(avail.width() * m_masterRatio)) - gIn / 2;
         int rightX = avail.left() + leftW + gIn;
         int rightW = avail.width() - leftW - gIn;
 
-        // Чётные индексы (0, 3, 5...) идут в левую колонку, нечётные (1, 2, 4...) — в правую:
-        // N=2: слева 1, справа 1 (2 рядом)
-        // N=3: слева 1, справа 2 (правая половина делится на 2)
-        // N=4: слева 2, справа 2 (левая половина тоже делится на 2)
-        // N=5: слева 2, справа 3 (правая на 3), N=6: слева 3, справа 3...
         int leftCount  = N / 2;
         int rightCount = N - leftCount;
 
@@ -445,7 +441,6 @@ void LookManager::applyTilingLayoutPass() {
             placeWindowWithDwmFrameCompensation(reinterpret_cast<HWND>(rightWins[i]), QRect(rightX, y, rightW, h));
         }
     } else if (m_tilingLayout == 1) {
-        // Master + Стек (1 главное окно слева во всю высоту, остальные стеком справа)
         int masterW = int(std::round(avail.width() * m_masterRatio)) - gIn / 2;
         int stackX  = avail.left() + masterW + gIn;
         int stackW  = avail.width() - masterW - gIn;
@@ -462,7 +457,6 @@ void LookManager::applyTilingLayoutPass() {
             placeWindowWithDwmFrameCompensation(reinterpret_cast<HWND>(m_tiledOrder[i + 1]), QRect(stackX, y, stackW, h));
         }
     } else if (m_tilingLayout == 2) {
-        // Вертикальные колонки (Columns)
         int colW = std::max(100, (avail.width() - gIn * (N - 1)) / N);
         for (int i = 0; i < N; ++i) {
             int x = avail.left() + i * (colW + gIn);
@@ -533,7 +527,8 @@ void LookManager::onTick() {
 
         bool isAct = (hwnd == c->fg);
         double targetOp = isAct ? c->self->m_activeOpacity : c->self->m_inactiveOpacity;
-        if (c->self->m_blurEnabled && targetOp > 0.90) {
+        bool allowBlurForWin = c->self->m_blurEnabled && (isAct || c->seen->size() < 2);
+        if (allowBlurForWin && targetOp > 0.90) {
             targetOp = 0.86;
         }
         BYTE alpha = static_cast<BYTE>(std::clamp(int(std::round(targetOp * 255.0)), 64, 255));
@@ -541,10 +536,11 @@ void LookManager::onTick() {
         struct CachedWinLook { BYTE alpha; int mode; int sz; RECT r; };
         static QHash<quintptr, CachedWinLook> s_lookCache;
         int curSzInt = int(std::round(c->self->m_blurSize * 10.0));
+        int effMode = allowBlurForWin ? c->self->m_blurMode : -1;
         auto itCache = s_lookCache.find(key);
         bool lookSame = (itCache != s_lookCache.end() &&
                          itCache->alpha == alpha &&
-                         itCache->mode == (c->self->m_blurEnabled ? c->self->m_blurMode : -1) &&
+                         itCache->mode == effMode &&
                          itCache->sz == curSzInt &&
                          std::abs(itCache->r.left - r.left) <= 1 &&
                          std::abs(itCache->r.top - r.top) <= 1 &&
@@ -552,9 +548,11 @@ void LookManager::onTick() {
                          std::abs((itCache->r.bottom - itCache->r.top) - h) <= 1);
 
         c->self->m_managedHwnds.insert(key);
-        c->seen->insert(key);
+        if (allowBlurForWin) {
+            c->seen->insert(key);
+        }
 
-        HWND hBlur = c->self->m_blurEnabled ? getOrCreateBlurBackdrop(key) : nullptr;
+        HWND hBlur = allowBlurForWin ? getOrCreateBlurBackdrop(key) : nullptr;
         bool zOrderLost = (hBlur && (GetWindow(hwnd, GW_HWNDNEXT) != hBlur || !IsWindowVisible(hBlur)));
 
         if (!lookSame || zOrderLost) {
@@ -563,13 +561,13 @@ void LookManager::onTick() {
             }
             SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
 
-            if (c->self->m_blurEnabled && hBlur) {
+            if (allowBlurForWin && hBlur) {
                 if (!lookSame) {
                     applyDwmBlurToSheet(hBlur, c->self->m_blurMode, c->self->m_blurSize);
                 }
                 SetWindowPos(hBlur, hwnd, r.left, r.top, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSENDCHANGING);
             }
-            s_lookCache.insert(key, CachedWinLook{alpha, c->self->m_blurEnabled ? c->self->m_blurMode : -1, curSzInt, r});
+            s_lookCache.insert(key, CachedWinLook{alpha, effMode, curSzInt, r});
         }
         return TRUE;
     }, reinterpret_cast<LPARAM>(&ctx));
@@ -606,7 +604,7 @@ void LookManager::setIgnoreFullscreen(bool v) { if (m_ignoreFullscreen != v) { m
 void LookManager::setTilingEnabled(bool v) {
     if (m_tilingEnabled != v) {
         m_tilingEnabled = v;
-        if (v) applyTilingLayoutPass();
+        if (v) { if (!m_timer.isActive()) m_timer.start(); applyTilingLayoutPass(); }
         emit stateChanged();
         save();
     }
@@ -665,18 +663,15 @@ void LookManager::toggleActiveWindowFloating() {
 #ifdef Q_OS_WIN
     HWND fg = GetForegroundWindow();
     if (!fg) return;
-    DWORD selfPid = GetCurrentProcessId();
     int scrW = GetSystemMetrics(SM_CXSCREEN);
     int scrH = GetSystemMetrics(SM_CYSCREEN);
     quintptr key = reinterpret_cast<quintptr>(fg);
 
     if (m_floatingHwnds.contains(key)) {
-        // Возвращаем окно обратно в сетку тайлинга
         m_floatingHwnds.remove(key);
         if (!m_tiledOrder.contains(key)) m_tiledOrder.prepend(key);
         applyTilingLayoutPass();
     } else {
-        // Переводим в плавающий режим, делаем компактным и ставим ровно по центру экрана!
         if (m_tilingEnabled) {
             m_floatingHwnds.insert(key);
             m_tiledOrder.removeAll(key);
@@ -690,7 +685,6 @@ void LookManager::toggleActiveWindowFloating() {
         placeWindowWithDwmFrameCompensation(fg, QRect(cx, cy, floatW, floatH));
         SetWindowPos(fg, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
     }
-    Q_UNUSED(selfPid);
 #endif
 }
 
@@ -724,15 +718,10 @@ void LookManager::moveActiveTiledWindow(int dir) {
 
         bool match = false;
         double score = 0.0;
-        if (dir == 0 && dx < -30.0) { // Left (← / A)
-            match = true; score = std::abs(dx) + std::abs(dy) * 2.2;
-        } else if (dir == 1 && dx > 30.0) { // Right (→ / D)
-            match = true; score = std::abs(dx) + std::abs(dy) * 2.2;
-        } else if (dir == 2 && dy < -30.0) { // Up (↑ / W)
-            match = true; score = std::abs(dy) + std::abs(dx) * 2.2;
-        } else if (dir == 3 && dy > 30.0) { // Down (↓ / S)
-            match = true; score = std::abs(dy) + std::abs(dx) * 2.2;
-        }
+        if (dir == 0 && dx < -30.0) { match = true; score = std::abs(dx) + std::abs(dy) * 2.2; }
+        else if (dir == 1 && dx > 30.0) { match = true; score = std::abs(dx) + std::abs(dy) * 2.2; }
+        else if (dir == 2 && dy < -30.0) { match = true; score = std::abs(dy) + std::abs(dx) * 2.2; }
+        else if (dir == 3 && dy > 30.0) { match = true; score = std::abs(dy) + std::abs(dx) * 2.2; }
         if (match && score < bestScore) {
             bestScore = score;
             bestIdx = i;
@@ -815,8 +804,8 @@ void LookManager::applySystemSelectionColors(const QColor &highlightCol, const Q
 }
 void LookManager::restoreDefaultSelectionColors() { applySystemSelectionColors(QColor(0, 120, 215), QColor(0, 102, 204)); save(); }
 void LookManager::resetDefaults() {
-    setEnabled(false); m_activeOpacity = 0.92; m_inactiveOpacity = 0.80; m_blurEnabled = false; m_blurMode = 0; m_ignoreFullscreen = true;
-    m_tilingEnabled = false; m_tilingLayout = 0; m_gapsIn = 8; m_gapsOut = 10; m_masterRatio = 0.50; m_floatWinWal = true;
+    setEnabled(true); m_activeOpacity = 1.0; m_inactiveOpacity = 1.0; m_blurEnabled = true; m_blurMode = 0; m_blurSize = 1.0; m_ignoreFullscreen = true;
+    m_tilingEnabled = false; m_tilingLayout = 0; m_gapsIn = 8; m_gapsOut = 10; m_masterRatio = 0.54; m_floatWinWal = true;
     m_floatingHwnds.clear(); m_tiledOrder.clear();
-    restoreAllWindows(); emit stateChanged(); save();
+    onTick(); emit stateChanged(); save();
 }

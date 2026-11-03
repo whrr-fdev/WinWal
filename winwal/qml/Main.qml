@@ -759,67 +759,108 @@ ApplicationWindow {
                 fragmentShader: "qrc:/shaders/qml/shaders/click_fx.frag.qsb"
             }
 
-            // Интерактивные границы и углы для изменения размера окна мышью (как у обычного окна Windows)
+            // Прямое изменение размера окна мышью за любые края и углы (работает 100% на безрамочных окнах!)
             Item {
                 id: winResizeBorders
                 anchors.fill: parent
-                z: 2000
+                z: 3000
                 visible: root.visibility === Window.Windowed
+
+                property int activeEdges: 0
+                property real startScreenX: 0
+                property real startScreenY: 0
+                property int origX: 0
+                property int origY: 0
+                property int origW: 0
+                property int origH: 0
+
+                function startResizeDrag(edges, mouseObj, areaItem) {
+                    activeEdges = edges
+                    var gp = areaItem.mapToGlobal(mouseObj.x, mouseObj.y)
+                    startScreenX = gp.x
+                    startScreenY = gp.y
+                    origX = root.x
+                    origY = root.y
+                    origW = root.width
+                    origH = root.height
+                }
+
+                function updateResizeDrag(mouseObj, areaItem) {
+                    if (activeEdges === 0) return
+                    var gp = areaItem.mapToGlobal(mouseObj.x, mouseObj.y)
+                    var dx = Math.round(gp.x - startScreenX)
+                    var dy = Math.round(gp.y - startScreenY)
+                    var nx = origX, ny = origY, nw = origW, nh = origH
+
+                    if (activeEdges & Qt.RightEdge) {
+                        nw = Math.max(root.minimumWidth, origW + dx)
+                    }
+                    if (activeEdges & Qt.BottomEdge) {
+                        nh = Math.max(root.minimumHeight, origH + dy)
+                    }
+                    if (activeEdges & Qt.LeftEdge) {
+                        var cw = Math.max(root.minimumWidth, origW - dx)
+                        nx = origX + (origW - cw)
+                        nw = cw
+                    }
+                    if (activeEdges & Qt.TopEdge) {
+                        var ch = Math.max(root.minimumHeight, origH - dy)
+                        ny = origY + (origH - ch)
+                        nh = ch
+                    }
+                    root.x = nx; root.y = ny; root.width = nw; root.height = nh
+                }
 
                 // Левая грань
                 MouseArea {
-                    anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
-                    anchors.topMargin: 8; anchors.bottomMargin: 8; width: 6
-                    cursorShape: Qt.SizeHorCursor
-                    onPressed: root.startSystemResize(Qt.LeftEdge)
+                    id: maL; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                    anchors.topMargin: 10; anchors.bottomMargin: 10; width: 7; cursorShape: Qt.SizeHorCursor
+                    onPressed: (m) => winResizeBorders.startResizeDrag(Qt.LeftEdge, m, maL)
+                    onPositionChanged: (m) => { if (pressed) winResizeBorders.updateResizeDrag(m, maL) }
                 }
                 // Правая грань
                 MouseArea {
-                    anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom
-                    anchors.topMargin: 8; anchors.bottomMargin: 8; width: 6
-                    cursorShape: Qt.SizeHorCursor
-                    onPressed: root.startSystemResize(Qt.RightEdge)
+                    id: maR; anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom
+                    anchors.topMargin: 10; anchors.bottomMargin: 10; width: 7; cursorShape: Qt.SizeHorCursor
+                    onPressed: (m) => winResizeBorders.startResizeDrag(Qt.RightEdge, m, maR)
+                    onPositionChanged: (m) => { if (pressed) winResizeBorders.updateResizeDrag(m, maR) }
                 }
                 // Верхняя грань
                 MouseArea {
-                    anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
-                    anchors.leftMargin: 8; anchors.rightMargin: 8; height: 5
-                    cursorShape: Qt.SizeVerCursor
-                    onPressed: root.startSystemResize(Qt.TopEdge)
+                    id: maT; anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+                    anchors.leftMargin: 10; anchors.rightMargin: 105; height: 6; cursorShape: Qt.SizeVerCursor
+                    onPressed: (m) => winResizeBorders.startResizeDrag(Qt.TopEdge, m, maT)
+                    onPositionChanged: (m) => { if (pressed) winResizeBorders.updateResizeDrag(m, maT) }
                 }
                 // Нижняя грань
                 MouseArea {
-                    anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
-                    anchors.leftMargin: 8; anchors.rightMargin: 8; height: 6
-                    cursorShape: Qt.SizeVerCursor
-                    onPressed: root.startSystemResize(Qt.BottomEdge)
+                    id: maB; anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
+                    anchors.leftMargin: 10; anchors.rightMargin: 10; height: 7; cursorShape: Qt.SizeVerCursor
+                    onPressed: (m) => winResizeBorders.startResizeDrag(Qt.BottomEdge, m, maB)
+                    onPositionChanged: (m) => { if (pressed) winResizeBorders.updateResizeDrag(m, maB) }
                 }
-                // Левый верхний угол
+                // 4 угла
                 MouseArea {
-                    anchors.left: parent.left; anchors.top: parent.top; width: 10; height: 10
-                    cursorShape: Qt.SizeFDiagCursor
-                    onPressed: root.startSystemResize(Qt.LeftEdge | Qt.TopEdge)
+                    id: maTL; anchors.left: parent.left; anchors.top: parent.top; width: 12; height: 12; cursorShape: Qt.SizeFDiagCursor
+                    onPressed: (m) => winResizeBorders.startResizeDrag(Qt.LeftEdge | Qt.TopEdge, m, maTL)
+                    onPositionChanged: (m) => { if (pressed) winResizeBorders.updateResizeDrag(m, maTL) }
                 }
-                // Правый верхний угол
                 MouseArea {
-                    anchors.right: parent.right; anchors.top: parent.top; width: 10; height: 10
-                    cursorShape: Qt.SizeBDiagCursor
-                    onPressed: root.startSystemResize(Qt.RightEdge | Qt.TopEdge)
+                    id: maTR; anchors.right: parent.right; anchors.top: parent.top; width: 12; height: 12; cursorShape: Qt.SizeBDiagCursor
+                    onPressed: (m) => winResizeBorders.startResizeDrag(Qt.RightEdge | Qt.TopEdge, m, maTR)
+                    onPositionChanged: (m) => { if (pressed) winResizeBorders.updateResizeDrag(m, maTR) }
                 }
-                // Левый нижний угол
                 MouseArea {
-                    anchors.left: parent.left; anchors.bottom: parent.bottom; width: 10; height: 10
-                    cursorShape: Qt.SizeBDiagCursor
-                    onPressed: root.startSystemResize(Qt.LeftEdge | Qt.BottomEdge)
+                    id: maBL; anchors.left: parent.left; anchors.bottom: parent.bottom; width: 12; height: 12; cursorShape: Qt.SizeBDiagCursor
+                    onPressed: (m) => winResizeBorders.startResizeDrag(Qt.LeftEdge | Qt.BottomEdge, m, maBL)
+                    onPositionChanged: (m) => { if (pressed) winResizeBorders.updateResizeDrag(m, maBL) }
                 }
-                // Правый нижний угол
                 MouseArea {
-                    anchors.right: parent.right; anchors.bottom: parent.bottom; width: 10; height: 10
-                    cursorShape: Qt.SizeFDiagCursor
-                    onPressed: root.startSystemResize(Qt.RightEdge | Qt.BottomEdge)
+                    id: maBR; anchors.right: parent.right; anchors.bottom: parent.bottom; width: 12; height: 12; cursorShape: Qt.SizeFDiagCursor
+                    onPressed: (m) => winResizeBorders.startResizeDrag(Qt.RightEdge | Qt.BottomEdge, m, maBR)
+                    onPositionChanged: (m) => { if (pressed) winResizeBorders.updateResizeDrag(m, maBR) }
                 }
             }
-
             Item {
                 id: winCaptionBar
                 anchors.top: parent.top
@@ -830,6 +871,7 @@ ApplicationWindow {
 
                 MouseArea {
                     anchors.fill: parent
+                    anchors.leftMargin: sidebar.showBar ? Math.round(136 * (Config ? Config.uiScale : 1.0)) : 0
                     anchors.rightMargin: 105
                     acceptedButtons: Qt.LeftButton
                     onPressed: root.startSystemMove()

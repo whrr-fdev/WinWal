@@ -380,7 +380,7 @@ WallpapersManager::WallpapersManager(QObject *parent) : QObject(parent) {
     });
 
     QTimer *keepBot = new QTimer(this);
-    connect(keepBot, &QTimer::timeout, this, []() {
+    connect(keepBot, &QTimer::timeout, this, [this]() {
         if (s_gpuWallWin && s_gpuWallWin->isVisible()) {
             HWND hWall = reinterpret_cast<HWND>(s_gpuWallWin->winId());
             if (hWall && IsWindow(hWall)) {
@@ -401,7 +401,7 @@ WallpapersManager::WallpapersManager(QObject *parent) : QObject(parent) {
                     }
                 }
                 bool deskCovered = false;
-                if (!mainWinOpen) {
+                if (m_pauseOnMaximized && !mainWinOpen) {
                     EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
                         if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return TRUE;
                         INT cloaked = 0;
@@ -615,7 +615,7 @@ void WallpapersManager::loadDaemonSettings() {
         int val = QTextStream(&fInt).readLine().trimmed().toInt();
         if (val > 0) m_autoInterval = val;
     }
-    QFile fAnim(home + "/.config/hypr/scripts/random_anim.conf");
+    QFile fPause(home + "/.config/hypr/scripts/pause_wallpaper_max.conf"); if (fPause.open(QIODevice::ReadOnly | QIODevice::Text)) m_pauseOnMaximized = (QTextStream(&fPause).readLine().trimmed() != "0"); QFile fAnim(home + "/.config/hypr/scripts/random_anim.conf");
     if (fAnim.open(QIODevice::ReadOnly | QIODevice::Text)) m_randomAnim = (QTextStream(&fAnim).readLine().trimmed() == "1");
 }
 
@@ -1017,4 +1017,20 @@ void WallpapersManager::shutdownRestoreDesktop() {
         RedrawWindow(hProgman, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
     }
 #endif
+}
+void WallpapersManager::setPauseOnMaximized(bool v) {
+    if (m_pauseOnMaximized == v) return;
+    m_pauseOnMaximized = v;
+    QFile f(QDir::homePath() + "/.config/hypr/scripts/pause_wallpaper_max.conf");
+    if (f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        QTextStream(&f) << (v ? "1" : "0") << "\n";
+    }
+    if (!v && s_gpuWallWin) {
+        QMetaObject::invokeMethod(s_gpuWallWin, "setVideoPausedByMaximized", Q_ARG(QVariant, false));
+    }
+    emit animChanged();
+}
+
+bool WallpapersManager::githubWallpapersSynced() const {
+    return QFile::exists(QDir::homePath() + "/Pictures/Wallpapers/.gh_whrr_wallpapers_v2.ok") || m_categories.size() >= 4;
 }

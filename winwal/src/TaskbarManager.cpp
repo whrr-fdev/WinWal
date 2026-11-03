@@ -208,14 +208,13 @@ static void updatePillBackdrop(HWND hTray, int barY, int barH, const QVector<QRe
 
     // Родной фон Shell_TrayWnd всегда держим на 100% прозрачным и БЕЗ SetWindowRgn,
     // чтобы выделение иконок никогда не резалось пиксельной лесенкой GDI и прямоугольный блюр не вылезал наружу!
-    SetWindowRgn(hTray, nullptr, FALSE);
-    setHwndAccent(hTray, 0, Qt::black, 0.0, false);
-
     QString key = QString("%1_%2_%3_%4_%5_%6_%7").arg(barY).arg(barH).arg(radiusPx).arg(effStyle).arg(col.name()).arg(int(opacity * 100)).arg(showBorder ? 1 : 0);
     for (const QRect &r : localPills) key += QString("_%1_%2_%3_%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
 
     if (key != s_lastBackdropKey) {
         s_lastBackdropKey = key;
+        SetWindowRgn(hTray, nullptr, FALSE);
+        setHwndAccent(hTray, 0, Qt::black, 0.0, false);
         QImage img(scrW, barH, QImage::Format_ARGB32_Premultiplied);
         img.fill(Qt::transparent);
 
@@ -313,15 +312,12 @@ static bool s_topSplitActive = false;
 static int s_topRightPillLeft = 1650;
 
 std::atomic<bool> g_workspaceGlideActive{false};
-struct GlidingWinEntry {
-    HWND hwnd;
-    RECT origRect;
-};
-static QVector<GlidingWinEntry> s_glidingWindows;
+static HWND s_hSlideBanner = nullptr;
 static QTimer *s_slideBannerTimer = nullptr;
 static QElapsedTimer s_slideClock;
 static int s_slideDir = 1;
 static int s_slideTargetWs = 1;
+static bool s_hasCapturedWindows = false;
 static double s_wsAnimFrom = 1.0;
 static double s_wsAnimCurrent = 1.0;
 static double s_wsAnimStretch = 0.0;
@@ -353,78 +349,6 @@ static HWND findMainWinWalHwnd() {
     return nullptr;
 }
 
-static void finishWindowGlideInstant() {
-    if (s_glidingWindows.isEmpty()) {
-        g_workspaceGlideActive = false;
-        return;
-    }
-    HDWP hdwp = BeginDeferWindowPos(s_glidingWindows.size());
-    for (const GlidingWinEntry &e : s_glidingWindows) {
-        if (IsWindow(e.hwnd) && !IsZoomed(e.hwnd)) {
-            int w = e.origRect.right - e.origRect.left;
-            int h = e.origRect.bottom - e.origRect.top;
-            if (hdwp) {
-                hdwp = DeferWindowPos(hdwp, e.hwnd, nullptr, e.origRect.left, e.origRect.top, w, h,
-                                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
-            } else {
-                SetWindowPos(e.hwnd, nullptr, e.origRect.left, e.origRect.top, w, h,
-                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
-            }
-        }
-    }
-    if (hdwp) EndDeferWindowPos(hdwp);
-    s_glidingWindows.clear();
-    g_workspaceGlideActive = false;
-}
-
-static void updateSlideBannerFrame() {
-    if (s_isShuttingDown) return;
-    const double durationMs = 240.0;
-    double t = std::clamp(double(s_slideClock.elapsed()) / durationMs, 0.0, 1.0);
-
-    double inv = 1.0 - t;
-    double ease = 1.0 - (inv * inv * inv * inv);
-
-    s_wsAnimCurrent = s_wsAnimFrom + (double(s_currentWorkspace) - s_wsAnimFrom) * ease;
-    s_wsAnimStretch = std::sin(t * 3.14159265) * 0.42 * std::min(2.0, std::abs(double(s_currentWorkspace) - s_wsAnimFrom));
-    if (s_hWsBar && IsWindow(s_hWsBar)) {
-        updateWsOrTopBarOverlay(s_topSplitActive, s_lastWsX, s_lastWsY, s_lastWsH,
-                                s_lastWsRadius, s_lastWsStyle, s_lastWsColor, s_lastWsOpacity, s_lastWsBorder);
-    }
-
-    if (t >= 1.0) {
-        s_wsAnimCurrent = double(s_currentWorkspace);
-        s_wsAnimStretch = 0.0;
-        if (s_slideBannerTimer) s_slideBannerTimer->stop();
-        finishWindowGlideInstant();
-        if (s_hWsBar && IsWindow(s_hWsBar)) {
-            updateWsOrTopBarOverlay(s_topSplitActive, s_lastWsX, s_lastWsY, s_lastWsH,
-                                    s_lastWsRadius, s_lastWsStyle, s_lastWsColor, s_lastWsOpacity, s_lastWsBorder);
-        }
-        return;
-    }
-
-    // Плавно скользят ТОЛЬКО сами окна нового рабочего стола (обои и часы стоят 100% неподвижно!)
-    if (!s_glidingWindows.isEmpty()) {
-        int offsetX = int(std::round(s_slideDir * 96.0 * (1.0 - ease)));
-        HDWP hdwp = BeginDeferWindowPos(s_glidingWindows.size());
-        for (const GlidingWinEntry &e : s_glidingWindows) {
-            if (IsWindow(e.hwnd) && !IsZoomed(e.hwnd)) {
-                int w = e.origRect.right - e.origRect.left;
-                int h = e.origRect.bottom - e.origRect.top;
-                if (hdwp) {
-                    hdwp = DeferWindowPos(hdwp, e.hwnd, nullptr, e.origRect.left + offsetX, e.origRect.top, w, h,
-                                          SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
-                } else {
-                    SetWindowPos(e.hwnd, nullptr, e.origRect.left + offsetX, e.origRect.top, w, h,
-                                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
-                }
-            }
-        }
-        if (hdwp) EndDeferWindowPos(hdwp);
-    }
-}
-
 static bool isManageableWorkspaceWindow(HWND hwnd) {
     if (!IsWindow(hwnd) || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return false;
     if (hwnd == findMainWinWalHwnd()) return false;
@@ -448,9 +372,122 @@ static bool isManageableWorkspaceWindow(HWND hwnd) {
     return true;
 }
 
+// Захватывает ТОЛЬКО прямоугольники открытых окон на 100% прозрачном фоне (обои НЕ захватываются и не двигаются, а координаты окон НЕ меняются!)
+static void captureWindowsOnlyForSlide(const QVector<RECT> &winRects) {
+    if (winRects.isEmpty()) {
+        s_hasCapturedWindows = false;
+        if (s_hSlideBanner && IsWindow(s_hSlideBanner)) ShowWindow(s_hSlideBanner, SW_HIDE);
+        return;
+    }
+    s_hasCapturedWindows = true;
+    int scrW = GetSystemMetrics(SM_CXSCREEN);
+    int scrH = std::max(200, GetSystemMetrics(SM_CYSCREEN) - 32);
+
+    static bool s_regSlide = false;
+    if (!s_regSlide) {
+        WNDCLASSEXW wc = { sizeof(WNDCLASSEXW) };
+        wc.lpfnWndProc = DefWindowProcW;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"WinWalSlideBanner";
+        RegisterClassExW(&wc);
+        s_regSlide = true;
+    }
+    if (!s_hSlideBanner || !IsWindow(s_hSlideBanner)) {
+        s_hSlideBanner = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
+            L"WinWalSlideBanner", L"", WS_POPUP,
+            0, 0, scrW, scrH, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    }
+    if (IsWindowVisible(s_hSlideBanner)) ShowWindow(s_hSlideBanner, SW_HIDE);
+
+    HDC hdcScreen = GetDC(nullptr);
+    HDC hdcMem = CreateCompatibleDC(hdcScreen);
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = scrW;
+    bmi.bmiHeader.biHeight = -scrH;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void *pvBits = nullptr;
+    HBITMAP hBmp = CreateDIBSection(hdcMem, &bmi, DIB_RGB_COLORS, &pvBits, nullptr, 0);
+    if (hBmp && pvBits) {
+        // Весь фон изначально на 100% прозрачный (0x00000000) — обои сквозь него стоят абсолютно неподвижно!
+        memset(pvBits, 0, size_t(scrW) * size_t(scrH) * 4);
+        HGDIOBJ old = SelectObject(hdcMem, hBmp);
+        DWORD *px = static_cast<DWORD *>(pvBits);
+
+        for (const RECT &wr : winRects) {
+            int x0 = std::clamp(int(wr.left), 0, scrW);
+            int y0 = std::clamp(int(wr.top), 0, scrH);
+            int x1 = std::clamp(int(wr.right), 0, scrW);
+            int y1 = std::clamp(int(wr.bottom), 0, scrH);
+            int w = x1 - x0, h = y1 - y0;
+            if (w <= 4 || h <= 4) continue;
+            BitBlt(hdcMem, x0, y0, w, h, hdcScreen, x0, y0, SRCCOPY);
+            for (int y = y0; y < y1; ++y) {
+                DWORD *row = px + size_t(y) * size_t(scrW);
+                for (int x = x0; x < x1; ++x) {
+                    row[x] |= 0xFF000000u;
+                }
+            }
+        }
+
+        POINT ptDst = { 0, 0 };
+        SIZE szDst = { scrW, scrH };
+        POINT ptSrc = { 0, 0 };
+        BLENDFUNCTION bf = { AC_SRC_OVER, 0, 245, AC_SRC_ALPHA };
+        UpdateLayeredWindow(s_hSlideBanner, hdcScreen, &ptDst, &szDst, hdcMem, &ptSrc, 0, &bf, ULW_ALPHA);
+        SelectObject(hdcMem, old);
+        DeleteObject(hBmp);
+    }
+    DeleteDC(hdcMem);
+    ReleaseDC(nullptr, hdcScreen);
+    SetWindowPos(s_hSlideBanner, HWND_TOPMOST, 0, 0, scrW, scrH, SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSENDCHANGING);
+}
+
+static void updateSlideBannerFrame() {
+    if (s_isShuttingDown) return;
+    const double durationMs = 240.0;
+    double t = std::clamp(double(s_slideClock.elapsed()) / durationMs, 0.0, 1.0);
+
+    double inv = 1.0 - t;
+    double ease = 1.0 - (inv * inv * inv * inv);
+
+    s_wsAnimCurrent = s_wsAnimFrom + (double(s_currentWorkspace) - s_wsAnimFrom) * ease;
+    s_wsAnimStretch = std::sin(t * 3.14159265) * 0.42 * std::min(2.0, std::abs(double(s_currentWorkspace) - s_wsAnimFrom));
+    if (s_hWsBar && IsWindow(s_hWsBar)) {
+        updateWsOrTopBarOverlay(s_topSplitActive, s_lastWsX, s_lastWsY, s_lastWsH,
+                                s_lastWsRadius, s_lastWsStyle, s_lastWsColor, s_lastWsOpacity, s_lastWsBorder);
+    }
+
+    if (t >= 1.0) {
+        s_wsAnimCurrent = double(s_currentWorkspace);
+        s_wsAnimStretch = 0.0;
+        if (s_slideBannerTimer) s_slideBannerTimer->stop();
+        if (s_hSlideBanner && IsWindow(s_hSlideBanner)) ShowWindow(s_hSlideBanner, SW_HIDE);
+        if (s_hWsBar && IsWindow(s_hWsBar)) {
+            updateWsOrTopBarOverlay(s_topSplitActive, s_lastWsX, s_lastWsY, s_lastWsH,
+                                    s_lastWsRadius, s_lastWsStyle, s_lastWsColor, s_lastWsOpacity, s_lastWsBorder);
+        }
+        return;
+    }
+
+    if (s_hasCapturedWindows && s_hSlideBanner && IsWindow(s_hSlideBanner)) {
+        int curX = int(std::round(-s_slideDir * 130.0 * ease));
+        BYTE alpha = static_cast<BYTE>(std::clamp(int(std::round(245.0 * std::pow(1.0 - t, 1.5))), 0, 245));
+        POINT ptDst = { curX, 0 };
+        BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA };
+        UpdateLayeredWindow(s_hSlideBanner, nullptr, &ptDst, nullptr, nullptr, nullptr, 0, &bf, ULW_ALPHA);
+    }
+}
+
 static void restoreAllWorkspacesOnExit() {
     if (s_slideBannerTimer) s_slideBannerTimer->stop();
-    finishWindowGlideInstant();
+    if (s_hSlideBanner && IsWindow(s_hSlideBanner)) {
+        DestroyWindow(s_hSlideBanner);
+        s_hSlideBanner = nullptr;
+    }
     for (auto mapIt = s_workspaceWindows.begin(); mapIt != s_workspaceWindows.end(); ++mapIt) {
         for (quintptr raw : mapIt.value()) {
             HWND h = reinterpret_cast<HWND>(raw);
@@ -470,12 +507,42 @@ static void switchVirtualWorkspace(int targetWs) {
     targetWs = std::clamp(targetWs, 1, 5);
     if (targetWs == s_currentWorkspace) return;
 
-    finishWindowGlideInstant();
-
     s_slideDir = (targetWs > s_currentWorkspace) ? 1 : -1;
     s_slideTargetWs = targetWs;
     s_wsAnimFrom = s_wsAnimCurrent;
 
+    struct CaptureCtx {
+        QSet<quintptr> set;
+        QVector<RECT> rects;
+    } capCtx;
+
+    EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
+        if (isManageableWorkspaceWindow(hwnd)) {
+            auto *c = reinterpret_cast<CaptureCtx *>(lParam);
+            c->set.insert(reinterpret_cast<quintptr>(hwnd));
+            RECT r = {};
+            if (FAILED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)))) {
+                GetWindowRect(hwnd, &r);
+            }
+            c->rects.append(r);
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&capCtx));
+
+    if (QWindow *mainWin = findMainWinWalWindow()) {
+        if (mainWin->isVisible() && mainWin->visibility() != QWindow::Minimized) {
+            RECT mr = {};
+            if (HWND hM = findMainWinWalHwnd()) {
+                GetWindowRect(hM, &mr);
+                capCtx.rects.append(mr);
+            }
+        }
+    }
+
+    // 1. Захватываем в прозрачный слой ТОЛЬКО прямоугольники окон (обои НЕ захватываются!)
+    captureWindowsOnlyForSlide(capCtx.rects);
+
+    // 2. Закрепляем главное окно WinWal за тем рабочим столом, на котором оно было открыто
     if (QWindow *mainWin = findMainWinWalWindow()) {
         if (mainWin->isVisible() && mainWin->visibility() != QWindow::Minimized) {
             s_winWalPinnedWorkspace = s_currentWorkspace;
@@ -490,31 +557,20 @@ static void switchVirtualWorkspace(int targetWs) {
         }
     }
 
-    QSet<quintptr> curSet;
-    EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
-        if (isManageableWorkspaceWindow(hwnd)) {
-            reinterpret_cast<QSet<quintptr>*>(lParam)->insert(reinterpret_cast<quintptr>(hwnd));
-            ShowWindowAsync(hwnd, SW_HIDE);
-        }
-        return TRUE;
-    }, reinterpret_cast<LPARAM>(&curSet));
-    s_workspaceWindows[s_currentWorkspace] = curSet;
+    // 3. Скрываем окна старого стола (НЕ меняя их координат!)
+    for (quintptr raw : capCtx.set) {
+        ShowWindowAsync(reinterpret_cast<HWND>(raw), SW_HIDE);
+    }
+    s_workspaceWindows[s_currentWorkspace] = capCtx.set;
 
     s_currentWorkspace = targetWs;
     s_lastWsRenderKey.clear();
 
-    g_workspaceGlideActive = true;
+    // 4. Показываем окна нового стола на их точных родных местах (0px смещения!)
     HWND lastShown = nullptr;
     for (quintptr raw : s_workspaceWindows.value(targetWs)) {
         HWND h = reinterpret_cast<HWND>(raw);
         if (IsWindow(h)) {
-            if (!IsZoomed(h)) {
-                RECT r = {};
-                GetWindowRect(h, &r);
-                s_glidingWindows.append(GlidingWinEntry{h, r});
-                SetWindowPos(h, nullptr, r.left + s_slideDir * 96, r.top, r.right - r.left, r.bottom - r.top,
-                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
-            }
             ShowWindowAsync(h, SW_SHOWNA);
             lastShown = h;
         }
@@ -537,7 +593,6 @@ static void moveActiveWindowToWorkspace(int targetWs) {
     if (!s_workspacesEnabledGlobal || s_isShuttingDown) return;
     targetWs = std::clamp(targetWs, 1, 5);
     if (targetWs == s_currentWorkspace) return;
-    finishWindowGlideInstant();
     HWND fg = GetForegroundWindow();
     if (!fg) return;
 
@@ -797,8 +852,7 @@ static void updateWsOrTopBarOverlay(bool fullTopBar, int x, int y, int h, int ra
         ReleaseDC(nullptr, hdcScreen);
     }
 
-    if (!IsWindowVisible(s_hWsBar)) ShowWindow(s_hWsBar, SW_SHOWNA);
-    SetWindowPos(s_hWsBar, topZOrderTarget(), winX, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSENDCHANGING);
+    if (!IsWindowVisible(s_hWsBar)) { ShowWindow(s_hWsBar, SW_SHOWNA); SetWindowPos(s_hWsBar, topZOrderTarget(), winX, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSENDCHANGING); }
 }
 
 static void applyFlyoutGlassEffect(HWND hwnd, bool isUwpCoreWindow, bool enable, int styleMode, const QColor &col, qreal opacity) {
@@ -1134,7 +1188,10 @@ static void processTaskbarFlyouts(
                                exeName.contains("SearchHost", Qt::CaseInsensitive);
         bool isShellExp = exeName.contains("ShellExperienceHost", Qt::CaseInsensitive);
 
-        if (isStartOrSearch || isShellExp) {
+        static QMap<quintptr, int> s_flyoutGlassCache;
+        int fKey = (glassEnabled ? 1000 : 0) + glassStyle * 100 + int(glassOpacity * 100) + glassColor.rgb();
+        if ((isStartOrSearch || isShellExp) && s_flyoutGlassCache.value(reinterpret_cast<quintptr>(hCore), -1) != fKey) {
+            s_flyoutGlassCache.insert(reinterpret_cast<quintptr>(hCore), fKey);
             applyFlyoutGlassEffect(hCore, true, glassEnabled, glassStyle, glassColor, glassOpacity);
         }
 
@@ -1536,7 +1593,7 @@ void TaskbarManager::onTick() {
                 }
                 if (m_showWorkspaces) {
                     updateWsOrTopBarOverlay(false, leftPillX + 4 + startW, int(trayRect.top), barH, m_dockRadius, effStyle, effColor, effOp, m_showBorder);
-                    SetWindowPos(hTray, s_hWsBar, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+                    if (GetWindow(s_hWsBar, GW_HWNDNEXT) != hTray) SetWindowPos(hTray, s_hWsBar, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
                 } else {
                     destroyWsOverlay();
                     SetWindowPos(hTray, topZOrderTarget(), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
@@ -1604,7 +1661,7 @@ void TaskbarManager::onTick() {
         ShowWindow(hReBar, s_dockHoverVisible ? SW_SHOWNA : SW_HIDE);
         ShowWindow(hTray, s_dockHoverVisible ? SW_SHOWNA : SW_HIDE);
         if (m_showWorkspaces && s_hWsBar) {
-            SetWindowPos(hTray, s_hWsBar, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+            if (GetWindow(s_hWsBar, GW_HWNDNEXT) != hTray) SetWindowPos(hTray, s_hWsBar, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
         } else {
             SetWindowPos(hTray, topZOrderTarget(), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
         }

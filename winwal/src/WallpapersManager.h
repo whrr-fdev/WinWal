@@ -21,6 +21,8 @@ class WallpapersManager : public QObject {
     Q_PROPERTY(QString autoMode READ autoMode WRITE setAutoMode NOTIFY daemonChanged)
     Q_PROPERTY(int autoInterval READ autoInterval WRITE setAutoInterval NOTIFY daemonChanged)
     Q_PROPERTY(bool randomAnim READ randomAnim WRITE setRandomAnim NOTIFY animChanged)
+    Q_PROPERTY(bool pauseOnMaximized READ pauseOnMaximized WRITE setPauseOnMaximized NOTIFY animChanged)
+    Q_PROPERTY(bool githubWallpapersSynced READ githubWallpapersSynced NOTIFY wallpapersChanged)
     Q_PROPERTY(QVariantList categories READ categories NOTIFY categoriesChanged)
     Q_PROPERTY(QVariantList wallpapers READ wallpapers NOTIFY wallpapersChanged)
     Q_PROPERTY(QVariantList presets READ presets NOTIFY presetsChanged)
@@ -42,6 +44,9 @@ public:
 
     bool randomAnim() const { return m_randomAnim; }
     void setRandomAnim(bool v);
+    bool pauseOnMaximized() const { return m_pauseOnMaximized; }
+    void setPauseOnMaximized(bool v);
+    bool githubWallpapersSynced() const;
 
     QVariantList categories() const { return m_categories; }
     QVariantList wallpapers() const { return m_wallpapers; }
@@ -83,6 +88,7 @@ private:
     QString m_autoMode = "all";
     int m_autoInterval = 120;
     bool m_randomAnim = true;
+    bool m_pauseOnMaximized = true;
     int m_activePresetIndex = -1;
     bool m_downloading = false;
     QString m_downloadStatus;

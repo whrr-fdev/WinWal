@@ -205,6 +205,11 @@ Item {
                             }
 
                             RowLayout {
+                                Text { text: "Пауза видео при окне во весь экран:"; color: Qt.rgba(1, 1, 1, 0.92); font.pixelSize: Config.fontSize; Layout.fillWidth: true }
+                                StyledSwitch { checked: Wallpapers.pauseOnMaximized; onToggled: Wallpapers.pauseOnMaximized = checked }
+                            }
+
+                            RowLayout {
                                 Text { text: Config ? (Config.language, Config.trAuto("Скругления окон:")) : "Скругления окон:"; color: Qt.rgba(1, 1, 1, 0.92); font.pixelSize: Config.fontSize; Layout.fillWidth: true }
                                 StyledSwitch {
                                     checked: Theme.isRounded
@@ -274,6 +279,7 @@ Item {
                     }
 
                     StyledButton {
+                        visible: !Wallpapers.githubWallpapersSynced || Wallpapers.downloading || Wallpapers.downloadStatus !== ""
                         Layout.fillWidth: true
                         allowFullWidth: true
                         enabled: true
@@ -690,6 +696,8 @@ Item {
                     contentItem: Text {
                         id: mCatTxt
                         text: modelData.name
+                        style: morphCatBtn.isSel ? Text.Normal : Text.Outline
+                        styleColor: Qt.rgba(0, 0, 0, 0.72)
                         color: morphCatBtn.isSel ? "#000000" : (morphCatBtn.hovered ? "#ffffff" : Qt.rgba(1, 1, 1, 0.92))
                         font.pixelSize: wallRoot.isExpanded ? Math.max(8, Config.fontSize - 2) : 10
                         font.bold: false
@@ -700,7 +708,7 @@ Item {
 
                     background: Rectangle {
                         radius: (Theme && Theme.isRounded) ? 3 : 0
-                        color: morphCatBtn.isSel ? "transparent" : Qt.rgba(0.05, 0.05, 0.07, 0.65)
+                        color: morphCatBtn.isSel ? "transparent" : Qt.rgba(1, 1, 1, Math.max(0.02, Config.cardOpacity * 0.12))
                         border.color: morphCatBtn.isSel ? "transparent" : Qt.rgba(1, 1, 1, 0.14)
                         border.width: 1
                     }
