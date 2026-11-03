@@ -1,0 +1,26 @@
+# Сборка и временные файлы
+winwal/build/
+Backups/
+*.zip
+*.txt
+!version.txt
+context*.txt
+
+# Тяжёлые локальные видео и DLL (кроме самого WinWal.exe для автообновлений)
+*.mp4
+*.webm
+*.mkv
+WinWal-Setup.exe
+WinWal-Portable/*.dll
+WinWal-Portable/imageformats/
+WinWal-Portable/multimedia/
+WinWal-Portable/platforms/
+WinWal-Portable/qml/
+WinWal-Portable/tls/
+WinWal-Portable/Wallpapers/
+WinWal-Portable/.winwal_first_launch.done
+winwal/Wallpapers/
+winwal/assets/Wallpapers/
+Wallpapers/
+clock_overlay/target/
+sysinfo/target/
